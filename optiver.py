@@ -44,9 +44,6 @@ sns.histplot(x='time_id', data=vol_clust, bins=50).set_title(
 book_example = pd.read_parquet('kaggle-download/trade_test.parquet/')
 
 
-
-
-
 # we load the data from book and train where stock id=0  and time id = 5 
 book_0 = pd.read_parquet('kaggle-download/book_train.parquet/stock_id=0')
 trade_0 =  pd.read_parquet('kaggle-download/trade_train.parquet/stock_id=0')
@@ -65,6 +62,70 @@ price_plot_0 = sns.lineplot(x='time_id', y='price', data=trade_0).set_title('pri
 trade_0.describe()
 
 price_plot = sns.lineplot(x='time_id', y='price', data=trade_0.iloc[:10000,]).set_title('price of stock_id=0')
+
+
+## Stock LIQUIDITY
+book_05 = book_0[book_0['time_id']==5]
+book_05['ask_size'] = book_05['ask_size1'].add(book_05['ask_size2'])
+book_05['bid_size'] = book_05['bid_size1'].add(book_05['bid_size2'])
+book_05['size_spread'] = book_05['ask_size'].add(-book_05['bid_size']).apply(np.abs)
+
+def liquidity(df):
+    # size spread
+    df['ask_size'] = df['ask_size1'].add(df['ask_size2'])
+    df['bid_size'] = df['bid_size1'].add(df['bid_size2'])
+    df['size_spread'] = df['ask_size'].add(-df['bid_size']).apply(np.abs)
+    # price spread
+    df['price_spread'] = df['ask_price1'].add(df['bid_price1']).apply(np.abs)
+     
+    
+    
+    return df
+
+book_example = book_0.groupby('time_id').apply(liquidity)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
