@@ -68,31 +68,41 @@ price_plot = sns.lineplot(x='time_id', y='price', data=trade_0.iloc[:10000,]).se
 book_05 = book_0[book_0['time_id']==5]
 book_05['ask_size'] = book_05['ask_size1'].add(book_05['ask_size2'])
 book_05['bid_size'] = book_05['bid_size1'].add(book_05['bid_size2'])
-book_05['size_spread'] = book_05['ask_size'].add(-book_05['bid_size']).apply(np.abs)
+book_05['size_spread'] = book_05['ask_size'].add(-book_05['bid_size'])
+book_05['price_spread'] = book_05['ask_price1'].add(-book_05['bid_price1'])
+#(book_05['price_spread'] < 0).values.any()
 
 def liquidity(df):
     # size spread
     df['ask_size'] = df['ask_size1'].add(df['ask_size2'])
     df['bid_size'] = df['bid_size1'].add(df['bid_size2'])
-    df['size_spread'] = df['ask_size'].add(-df['bid_size']).apply(np.abs)
+    df['size_spread'] = df['ask_size'].add(-df['bid_size']) #if negative, bid sz > ask sz
     # price spread
-    df['price_spread'] = df['ask_price1'].add(df['bid_price1']).apply(np.abs)
-     
-    
-    
+    df['price_spread'] = df['ask_price1'].add(df['bid_price1'])
+    df['price_spread2'] = df['ask_price2'].add(df['bid_price2'])
+       
     return df
 
 book_example = book_0.groupby('time_id').apply(liquidity)
 
+### VOLATILITY 
+trade_05 = trade_0[trade_0['time_id']==5]
 
+def calc_volatility(df):
+    df['returns'] = np.log(df.price/df.price.shift(1))
+    df = df.dropna()
+    vol = np.std(df.returns)*np.sqrt(252)
+    df['price_vol'] = vol
+    return df
 
+trade_example = trade_0.groupby('time_id').apply(calc_volatility)
 
+train_0 = trade_example[['time_id', 'volatility']].drop_duplicates().reset_index(drop=True)
 
-
-
-
-
-
+#join train df
+train_0 = train_0.merge(train[train['stock_id']==0], how='inner', on='time_id')
+#calculate diff of vols, to see if it went up or down
+train_0.assign(price_vol_diff = train_0['target']-train_0['price_vol'])
 
 
 
