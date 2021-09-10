@@ -3,6 +3,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pyarrow.parquet as pq
 import numpy as np
+from sklearn import metrics
+from sklearn.model_selection import train_test_split
+import lightgbm as lgbm
+import datetime
 
 # Download Data
 
@@ -41,9 +45,6 @@ sns.histplot(x='time_id', data=vol_clust, bins=50).set_title(
 #Maybe the volatility of the change in volatility can work as a reference.
 
 
-book_example = pd.read_parquet('kaggle-download/trade_test.parquet/')
-
-
 # we load the data from book and train where stock id=0  and time id = 5 
 book_0 = pd.read_parquet('kaggle-download/book_train.parquet/stock_id=0')
 trade_0 =  pd.read_parquet('kaggle-download/trade_train.parquet/stock_id=0')
@@ -55,76 +56,125 @@ trade_0 =  pd.read_parquet('kaggle-download/trade_train.parquet/stock_id=0')
 
 ###################################################################################
 
-# Analyze stock_id=0
-# TRAIN
-# Price movement
-price_plot_0 = sns.lineplot(x='time_id', y='price', data=trade_0).set_title('price of stock_id=0')
-trade_0.describe()
 
-price_plot = sns.lineplot(x='time_id', y='price', data=trade_0.iloc[:10000,]).set_title('price of stock_id=0')
+def row_id(stock_id, time_id):
+    return f'{int(stock_id)}-{int(time_id)}'
+
+def log_return(series):
+    return np.log(series).diff()
+
+def realized_volatility(series):
+    return np.sqrt(np.sum(series**2))
 
 
 ## Stock LIQUIDITY
+# When 
 book_05 = book_0[book_0['time_id']==5]
 book_05['ask_size'] = book_05['ask_size1'].add(book_05['ask_size2'])
 book_05['bid_size'] = book_05['bid_size1'].add(book_05['bid_size2'])
 book_05['size_spread'] = book_05['ask_size'].add(-book_05['bid_size'])
+book_05['median_size'] = book_05['ask_size'].add(-book_05['bid_size'])/2
+
 book_05['price_spread'] = book_05['ask_price1'].add(-book_05['bid_price1'])
 #(book_05['price_spread'] < 0).values.any()
 
-def liquidity(df):
-    # size spread
+def book_calcs(df):
+    # size
     df['ask_size'] = df['ask_size1'].add(df['ask_size2'])
     df['bid_size'] = df['bid_size1'].add(df['bid_size2'])
     df['size_spread'] = df['ask_size'].add(-df['bid_size']) #if negative, bid sz > ask sz
-    # price spread
+    df['median_size'] = df['ask_size'].add(-df['bid_size'])/2
+    # price
+    df['ask_price'] = (df['ask_price1']+df['ask_price2'])/2
+    df['bid_price'] = (df['bid_price1']+df['bid_price2'])/2
     df['price_spread'] = df['ask_price1'].add(df['bid_price1'])
     df['price_spread2'] = df['ask_price2'].add(df['bid_price2'])
-       
+    df['bid_price_spread'] = df['bid_price1'] - df['bid_price2']
+    df['ask_price_spread'] = df['ask_price2'] - df['ask_price1']
+    # wap
+    df['wap1'] = ( df['ask_size1']*df['bid_price1'] + df['bid_size1']*df['ask_price1'] )/(df['ask_size1']+df['bid_size1'])
+    df['wap2'] = ( df['ask_size2']*df['bid_price2'] + df['bid_size2']*df['ask_price2'] )/(df['ask_size2']+df['bid_size2'])
+    df['wap3'] = ( df['ask_size1']*df['ask_price1'] + df['bid_size1']*df['bid_price1'] )/(df['ask_size1']+df['bid_size1'])
+    df['wap4'] = ( df['ask_size2']*df['ask_price2'] + df['bid_size2']*df['bid_price2'] )/(df['ask_size2']+df['bid_size2']) 
+    # wap returns
+    df['wap1_ret'] = log_return(df['wap1'])
+    df['wap2_ret'] = log_return(df['wap2'])
+    df['wap3_ret'] = log_return(df['wap3'])
+    df['wap4_ret'] = log_return(df['wap4'])
+    # wap vol
+    df['wap1_vol'] = realized_volatility(df['wap1_ret'])
+    df['wap2_vol'] = realized_volatility(df['wap2_ret'])
+    df['wap3_vol'] = realized_volatility(df['wap3_ret'])
+    df['wap4_vol'] = realized_volatility(df['wap4_ret'])
     return df
 
-book_example = book_0.groupby('time_id').apply(liquidity)
+book_example = book_0.groupby('time_id').apply(book_calcs)
+book_example.columns
 
 ### VOLATILITY 
 trade_05 = trade_0[trade_0['time_id']==5]
-
-def calc_volatility(df):
-    df['returns'] = np.log(df.price/df.price.shift(1))
+        
+def trade_calcs(df):
+    df['vwap'] = (df['price']*df['size'])/df['size']
+    df['price_returns'] = log_return(df['price'])
+    df['vwap_returns'] = log_return(df['vwap'])
     df = df.dropna()
-    vol = np.std(df.returns)*np.sqrt(252)
-    df['price_vol'] = vol
+    #get realized_volatility
+    df['price_vol'] = realized_volatility(df.price_returns)
+    df['vwap_vol'] = realized_volatility(df.vwap_returns)
     return df
 
-trade_example = trade_0.groupby('time_id').apply(calc_volatility)
+trade_example = trade_0.groupby('time_id').apply(trade_calcs).reset_index(drop=True)
 
-train_0 = trade_example[['time_id', 'volatility']].drop_duplicates().reset_index(drop=True)
+#N of trades per time id
+a = trade_example.value_counts('time_id')
+sns.histplot(a, y='time_id', bins=1000)
+# trade_example['time_id'].nunique()
 
-#join train df
-train_0 = train_0.merge(train[train['stock_id']==0], how='inner', on='time_id')
-#calculate diff of vols, to see if it went up or down
-train_0.assign(price_vol_diff = train_0['target']-train_0['price_vol'])
-
-
-
-
+## Join calculated volatilities with row ids
+trade_vol = trade_example.drop_duplicates('time_id').filter(regex=r'(vol|time)')
+book_vol = book_example.drop_duplicates('time_id').filter(regex=r'(vol|time)')
 
 
+stock_0_train = trade_vol.merge(book_vol, how='left', on='time_id')
+stock_0_train = stock_0_vol.merge(train[:3830][['time_id', 'target']], how='left', on='time_id')
+stock_0_train['row_id'] = stock_0_train['time_id'].apply(lambda x: f'{0}-{x}')
+#rearrange columns
+cols = stock_0_train.columns.tolist()
+cols = cols[-1:] + cols[:-1]
+stock_0_train = stock_0_train[cols].drop(['time_id', 'vwap_vol'], axis=1)
 
 
-
-
-
-
-
-
-
-
-
+test_book = pd.read_parquet('kaggle-download/book_test.parquet/stock_id=0')
+test_trade = pd.read_parquet('kaggle-download/trade_test.parquet/stock_id=0')
 
 
 
+#### TRAINING MODEL ####
+X = stock_0_train.drop(['target', 'row_id'], axis=1)
+Y = stock_0_train['target']
+X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
 
+d_train = lgbm.Dataset(X_train, label=y_train)
+lgbm_params = {'learning_rate': 0.05,
+               'boosting_type': 'gbdt',
+               # 'objective': 'binary',
+               'metrics': ['rmspe'],
+               'num_leaves': 100,
+               'max_depth': 10}
 
+start = datetime.datetime.now()
+clf = lgbm.train(lgbm_params, train_set=d_train, num_boost_round=50)
+stop = datetime.datetime.now()
+execution_time_lgbm = stop-start
+print('LGBM execution time is: ', execution_time_lgbm)
+
+y_pred_lgbm = clf.predict(X_test)
+
+rmspe = (np.sqrt(np.mean(np.square((y_test - y_pred_lgbm) / y_test))))
+rmspe
+def rmspe(y_true, y_pred):
+    return  (np.sqrt(np.mean(np.square((y_true - y_pred) / y_true))))
 
 
 
