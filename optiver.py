@@ -163,42 +163,14 @@ def book_calcs(df):
     #         returns = returns.append(rets, ignore_index=True)
     #     else:
     #         returns=rets
-    df['wap1_200'] = calculateWindowedReturns(df, price_column='wap1', window=200)        
-    df['wap1_100'] = calculateWindowedReturns(df, price_column='wap1', window=100)       
+            
+    df['wap1_100'] = calculateWindowedReturns(df, price_column='wap1', window=100)  
+    df['wap1_200'] = calculateWindowedReturns(df, price_column='wap1', window=200)           
     df['wap1_300'] = calculateWindowedReturns(df, price_column='wap1', window=300)
+    df['wap1_400'] = calculateWindowedReturns(df, price_column='wap1', window=400)
     df['wap1_500'] = calculateWindowedReturns(df, price_column='wap1', window=500)
     
     return df
-
-book_example = book_0.groupby('time_id').apply(book_calcs)
-
-book_062 = book_example[book_example['time_id']==62].reset_index()
-calculateWindowedReturns(book_062, price_column='wap1', window=100, time_id=62)
-qqq = closest(book_062, window=100, price_column='wap1')
-
-book_05 = book_example[(book_example['time_id']==5) | (book_example['time_id']==11)]
-
-qqq = calculateWindowedReturns(book_05, 'wap1', 100, 11)
-qqq = closest(book_05[book_05['time_id']==11].reset_index(), 100, 'wap1')
-
-returns = pd.DataFrame()
-type(returns)
-del(returns)
-
-for i in book_05['time_id'].unique():
-    rets = calculateWindowedReturns(book_05, 'wap1', 100, i)
-    # returns.append(rets)
-    if not returns.empty:
-        returns = returns.append(rets, ignore_index=True)
-    else:
-        returns=rets
-        
-closest(book_05, 300, 'wap1')
-
-book_example = book_0.groupby('time_id').apply(book_calcs)
-
-qqq = closest(r, 100, 'price')
-qqq = closest(book_05, 0, 'wap1')
 
 book_example = book_0.groupby('time_id').apply(book_calcs)
 book_example.columns
