@@ -172,6 +172,7 @@ def book_calcs(df):
     
     return df
 
+
 book_example = book_0.groupby('time_id').apply(book_calcs)
 book_example.columns
 
