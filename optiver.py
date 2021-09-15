@@ -25,7 +25,7 @@ train['time_id'].value_counts().sort_index() # Rows per time_id
 # Distribution of Target
 sns.distplot(train['target'], color = 'b', label = 'target distribution').set(
     title = 'Distribution of target volatility',
-    xlabel='volatility target').text(0.8, 28, 'Text')
+    xlabel='volatility target')
 
 
 
@@ -67,17 +67,48 @@ def realized_volatility(series):
     return np.sqrt(np.sum(series**2))
 
 
+def closest(df, window, price_column):
+    #find which price to minus
+    dif_indexes = []
+    idx = 0
+    series = df['seconds_in_bucket']
+    for x in series:
+        # print(x)
+        # print(window)
+        To_Find = x-window
+        # print(To_Find)
+        if To_Find>0: 
+            if To_Find==series[idx]:
+                dif_indexes.append(idx)
+            elif abs(series[idx] - To_Find) < abs(series[idx+1]-To_Find):
+                dif_indexes.append(idx)
+            elif abs(series[idx+1] - To_Find) < abs(series[idx+2]-x):
+                dif_indexes.append(idx+1)
+                idx += 1
+            elif abs(series[idx+2] - To_Find) < abs(series[idx+3]-x):
+                dif_indexes.append(idx+2)
+                idx += 2
+            elif abs(series[idx+3] - To_Find) < abs(series[idx+4]-x):
+                dif_indexes.append(idx+3)
+                idx += 3
+    
+    # print(len(dif_indexes))
+    
+    indexes_df = df[df['seconds_in_bucket']>window]
+    # print(indexes_df)
+    # print(len(indexes_df))
+    indexes_df = indexes_df.assign(index_to_minus = dif_indexes)
+    # print(indexes_df)    
+    
+    df_with_indexes = df.merge(indexes_df, how='left')
+    df_with_indexes['price_to_minus'] = df_with_indexes['index_to_minus'].apply(lambda x: np.nan if pd.isnull(x) else df[price_column][x])
+    
+    #calculate window return
+    new_col_name = str(price_column) + '_' + str(window) + '_log_return' # window = 100
+    df_with_indexes[new_col_name] = np.log(df_with_indexes[price_column]) - np.log(df_with_indexes['price_to_minus'])
+    return df_with_indexes[[new_col_name]] #windowed return
+
 ## Stock LIQUIDITY
-# When 
-book_05 = book_0[book_0['time_id']==5]
-book_05['ask_size'] = book_05['ask_size1'].add(book_05['ask_size2'])
-book_05['bid_size'] = book_05['bid_size1'].add(book_05['bid_size2'])
-book_05['size_spread'] = book_05['ask_size'].add(-book_05['bid_size'])
-book_05['median_size'] = book_05['ask_size'].add(-book_05['bid_size'])/2
-
-book_05['price_spread'] = book_05['ask_price1'].add(-book_05['bid_price1'])
-#(book_05['price_spread'] < 0).values.any()
-
 def book_calcs(df):
     # size
     df['ask_size'] = df['ask_size1'].add(df['ask_size2'])
@@ -106,7 +137,68 @@ def book_calcs(df):
     df['wap2_vol'] = realized_volatility(df['wap2_ret'])
     df['wap3_vol'] = realized_volatility(df['wap3_ret'])
     df['wap4_vol'] = realized_volatility(df['wap4_ret'])
+    
+    
+    def calculateWindowedReturns(df, price_column, window):
+        windowed_returns = pd.DataFrame()
+        for i in df['time_id'].unique():
+            working_df = df[df['time_id']==i].reset_index()
+            rets = closest(working_df, window=window, price_column=price_column)
+            if not windowed_returns.empty:
+                windowed_returns = windowed_returns.append(rets, ignore_index=True)
+            else:
+                windowed_returns=rets
+        return windowed_returns
+        
+            
+            # working_df = df[df['time_id']==time_id].reset_index()
+            # return closest(working_df, window=window, price_column=price_column)
+    
+    # returns = pd.DataFrame()
+    # for i in df['time_id'].unique():
+    #     # print(i)
+    #     rets = calculateWindowedReturns(df, price_column='wap1', window=100, time_id=i)
+    #     # print(i)
+    #     if not returns.empty:
+    #         returns = returns.append(rets, ignore_index=True)
+    #     else:
+    #         returns=rets
+    df['wap1_200'] = calculateWindowedReturns(df, price_column='wap1', window=200)        
+    df['wap1_100'] = calculateWindowedReturns(df, price_column='wap1', window=100)       
+    df['wap1_300'] = calculateWindowedReturns(df, price_column='wap1', window=300)
+    df['wap1_500'] = calculateWindowedReturns(df, price_column='wap1', window=500)
+    
     return df
+
+book_example = book_0.groupby('time_id').apply(book_calcs)
+
+book_062 = book_example[book_example['time_id']==62].reset_index()
+calculateWindowedReturns(book_062, price_column='wap1', window=100, time_id=62)
+qqq = closest(book_062, window=100, price_column='wap1')
+
+book_05 = book_example[(book_example['time_id']==5) | (book_example['time_id']==11)]
+
+qqq = calculateWindowedReturns(book_05, 'wap1', 100, 11)
+qqq = closest(book_05[book_05['time_id']==11].reset_index(), 100, 'wap1')
+
+returns = pd.DataFrame()
+type(returns)
+del(returns)
+
+for i in book_05['time_id'].unique():
+    rets = calculateWindowedReturns(book_05, 'wap1', 100, i)
+    # returns.append(rets)
+    if not returns.empty:
+        returns = returns.append(rets, ignore_index=True)
+    else:
+        returns=rets
+        
+closest(book_05, 300, 'wap1')
+
+book_example = book_0.groupby('time_id').apply(book_calcs)
+
+qqq = closest(r, 100, 'price')
+qqq = closest(book_05, 0, 'wap1')
 
 book_example = book_0.groupby('time_id').apply(book_calcs)
 book_example.columns
