@@ -298,6 +298,7 @@ test_trade = pd.read_parquet('kaggle-download/trade_test.parquet/stock_id=0')
 
 
 
+
 #### TRAINING MODEL ####
 X = stock_0_train.drop(['target', 'row_id'], axis=1)
 Y = stock_0_train['target']
