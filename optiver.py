@@ -5,6 +5,8 @@ import pyarrow.parquet as pq
 import numpy as np
 from sklearn import metrics
 from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import MinMaxScaler
 import lightgbm as lgbm
 import datetime
 
@@ -50,13 +52,15 @@ sns.scatterplot(x='stock_id', y='target', data=vol2).set_title('mean "target" pe
 
 
 vol_stocks = train.nlargest(1000, 'target').sort_values('time_id')
-sns.histplot(x='stock_id', data=vol_stocks, bins=50).set_title('frequency of stock_id within 1000 largest volatilities')
+vol_stocks
+sns.histplot(x='stock_id', data=vol_stocks, bins=1000).set_title('frequency of stock_id within 1000 largest volatilities')
 
 
 # Volatility clustering, times with most volatility
 vol_clust = train.nlargest(1000, 'target')
+vol_clust
 vol_clust.value_counts('time_id') #Proves volatility clustering
-sns.histplot(x='time_id', data=vol_clust, bins=50).set_title('frequency of time_id within 1000 largest volatilities')
+sns.histplot(x='time_id', data=vol_clust, bins=1000).set_title('frequency of time_id within 1000 largest volatilities')
 
 #Some stocks are more volatility as well as theres times that are more volatile than others.
 #Maybe the volatility of the change in volatility can work as a reference.
@@ -189,8 +193,8 @@ end = datetime.datetime.now()
 print(end-start)
 book_example = book_example.set_index(['index'], drop=True)
 # book_example.columns
-a = book_example.value_counts(['time_id']).to_frame(name='count')
-print(a)
+count_book = book_example.value_counts(['time_id']).to_frame(name='count_book')
+print(count_book)
 
 
 def book_features_processing(book_df, columns_to_keep):
@@ -208,7 +212,7 @@ columns_to_keep_book = ['time_id', 'size_spread', 'd_size_spread',
 features_book = book_features_processing(book_example, columns_to_keep=columns_to_keep_book)
 features_book = features_book.rename_axis(['feature', 'stats'], axis='columns')
 # features_book['freq_time_id'] = features_book.merge(a, on='time_id')
-desc = features_book.describe()
+features_book[('count')]
 
 book_05 = book_0[book_0['time_id']==5]
 book_05 = book_05.groupby('time_id').apply(book_calcs)
@@ -234,11 +238,11 @@ def trade_calcs(df):
     windowed_returns = closest(df.reset_index(), 300, 'price')
     df = df.merge(windowed_returns, left_index=True, right_index=True)
     
-    windowed_returns = closest(df.reset_index(), 400, 'price')
-    df = df.merge(windowed_returns, left_index=True, right_index=True)
+    # windowed_returns = closest(df.reset_index(), 400, 'price')
+    # df = df.merge(windowed_returns, left_index=True, right_index=True)
     
-    windowed_returns = closest(df.reset_index(), 500, 'price')
-    df = df.merge(windowed_returns, left_index=True, right_index=True)
+    # windowed_returns = closest(df.reset_index(), 500, 'price')
+    # df = df.merge(windowed_returns, left_index=True, right_index=True)
     
     #Realized_volatility
     df['price_vol'] = realized_volatility(df.price_returns)
@@ -250,19 +254,21 @@ end = datetime.datetime.now()
 print(end-start)
 
 #N of trades per time id
-a = trade_example.value_counts('time_id').to_frame(name='count')
-print(a)
+trade_example = trade_example.set_index(['index'], drop=True)
+count_trade = trade_example.value_counts('time_id').to_frame(name='count_trade')
+print(count_trade)
 # sns.histplot(trade_example['time_id'], bins=5000).set_title('frequency of time_id in trade of stock_id=0')
 # trade_example['time_id'].nunique()
 
+train_0 = train[train['stock_id']==0]
 def trade_features_processing(trade_df, columns_to_keep):
     df = trade_df[columns_to_keep]
     df = df.groupby('time_id').agg(['min', 'max', 'mean', 'std', 'count'])
     return df
 
-columns_to_keep_trade = ['size', 'd_size',
+columns_to_keep_trade = ['time_id', 'size', 'd_size',
     'order_count', 'd_order_count', 'size_per_order',
-    'price_100', 'price_200', 'price_300', 'price_400', 'price_500']
+    'price_100', 'price_200', 'price_300']
 features_trade = trade_features_processing(trade_example, columns_to_keep_trade)
 features_trade = features_trade.rename_axis(['feature', 'stats'], axis='columns')
 
@@ -271,12 +277,27 @@ full_features = features_trade.merge(features_book, left_index=True, right_index
 
 
 ### Regression lots of trades
+a = train[train['stock_id']==0].drop('stock_id', axis=1)
+a = a.merge(count_book.reset_index(), on='time_id')
+a = a.merge(count_trade.reset_index(), on='time_id')
 
+linear_regressor = LinearRegression()
+#book count regression
+x = a['count_book'].values.reshape(-1, 1)
+y = a['target'].values.reshape(-1, 1)
+linear_regressor.fit(x, y)
+lm_score = linear_regressor.score(x, y)
+sns.regplot(x='count_book', y='target',data=a,
+            line_kws={"color": "red"}).set_title('relationship of # of book entries vs target volatility')
+plt.text(x=300,y=0.03,s=f'R-Square score: {np.round(lm_score, decimals=5)}')
 
-
-
-
-
+#trade count regression
+x = a['count_trade'].values.reshape(-1, 1)
+y = a['target'].values.reshape(-1, 1)
+lm_score = linear_regressor.score(x, y)
+sns.regplot(x='count_trade', y='target', data=a,
+            line_kws={"color": "red"}).set_title('relationship of # of trades vs target volatility')
+plt.text(x=50,y=0.03,s=f'R-Square score: {np.round(lm_score, decimals=5)}')
 
 
 ## Join calculated volatilities with row ids
@@ -284,33 +305,62 @@ trade_vol = trade_example.drop_duplicates('time_id').filter(regex=r'(vol|time)')
 book_vol = book_example.drop_duplicates('time_id').filter(regex=r'(vol|time)')
 
 
-stock_0_train = trade_vol.merge(book_vol, how='left', on='time_id')
-stock_0_train = stock_0_vol.merge(train[:3830][['time_id', 'target']], how='left', on='time_id')
-stock_0_train['row_id'] = stock_0_train['time_id'].apply(lambda x: f'{0}-{x}')
+#### FINAL FEATURES WRANGLING
+train_vol = trade_vol.merge(book_vol, how='left', on='time_id')
+full_features = features_trade.merge(features_book, left_index=True, right_index=True)
+full_features.columns = ['_'.join(col) for col in full_features.columns.values]
+full_features = full_features.merge(train_vol, on='time_id')
+#build train df
+stock_0_train = full_features.merge(train_0[['time_id', 'target']], how='left', on='time_id')
 #rearrange columns
 cols = stock_0_train.columns.tolist()
-cols = cols[-1:] + cols[:-1]
-stock_0_train = stock_0_train[cols].drop(['time_id', 'vwap_vol'], axis=1)
-
-
-test_book = pd.read_parquet('kaggle-download/book_test.parquet/stock_id=0')
-test_trade = pd.read_parquet('kaggle-download/trade_test.parquet/stock_id=0')
+cols = cols[:1] + cols[-1:] + cols[2:-1]
+stock_0_train = stock_0_train[cols]
 
 
 
+print(f'There is {stock_0_train.isna().values.sum()} NA values') 
+# www = np.isnan(stock_0_train).any()
+# www[www] # Columns that contain NAs
 
+#fill NAs with mode, then remaining NAs with mean
+stock_0_train = stock_0_train.apply(lambda x: x.fillna(x.mode())).apply(lambda x: x.fillna(x.mean()))
+print(f'There is {stock_0_train.isna().values.sum()} NA values')
+
+#cat timeids
+stock_0_train.dtypes
+stock_0_train['time_id']=stock_0_train['time_id'].astype('category')
+#Normalize
+min_max_scaler = MinMaxScaler(feature_range=(0,1))
+columns_to_scale = stock_0_train.columns.drop(['time_id', 'target']) 
+stock_0_train[columns_to_scale] = min_max_scaler.fit_transform(stock_0_train[columns_to_scale])
+
+
+
+
+
+
+
+
+
+
+
+    
 #### TRAINING MODEL ####
-X = stock_0_train.drop(['target', 'row_id'], axis=1)
+X = stock_0_train.drop(['target'], axis=1)
 Y = stock_0_train['target']
 X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
 
 d_train = lgbm.Dataset(X_train, label=y_train)
 lgbm_params = {'learning_rate': 0.05,
                'boosting_type': 'gbdt',
-               # 'objective': 'binary',
-               'metrics': ['rmspe'],
-               'num_leaves': 100,
-               'max_depth': 10}
+               'objective': 'regression',
+               'num_iteration': 100,
+               'tree_learner': 'feature_parallel',
+               'metrics': ['rmse', 'auc'],
+               'num_leaves': 200,
+               'max_depth': 20,
+               'verbose': -1}
 
 start = datetime.datetime.now()
 clf = lgbm.train(lgbm_params, train_set=d_train, num_boost_round=50)
@@ -318,16 +368,24 @@ stop = datetime.datetime.now()
 execution_time_lgbm = stop-start
 print('LGBM execution time is: ', execution_time_lgbm)
 
-y_pred_lgbm = clf.predict(X_test)
-
-rmspe = (np.sqrt(np.mean(np.square((y_test - y_pred_lgbm) / y_test))))
-rmspe
 def rmspe(y_true, y_pred):
-    return  (np.sqrt(np.mean(np.square((y_true - y_pred) / y_true))))
+    # y_true = np.array(y_true)
+    # y_pred = np.array(y_pred)
+    return (np.sqrt(np.mean(np.square((y_true - y_pred) / y_true))))
+ 
+y_pred_train_lgbm = clf.predict(X_train)
+lgbm_score = rmspe(y_train, y_pred_train_lgbm)
+print(f'Trainset rmspe is {lgbm_score}')
+
+# y_test
+y_pred_lgbm = clf.predict(X_test)
+lgbm_score = rmspe(y_test, y_pred_lgbm)
+print(f'Testset rmspe is {lgbm_score}')
 
 
 
-
+test_book = pd.read_parquet('kaggle-download/book_test.parquet/stock_id=0')
+test_trade = pd.read_parquet('kaggle-download/trade_test.parquet/stock_id=0')
 
 
 
