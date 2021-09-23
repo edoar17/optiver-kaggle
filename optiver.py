@@ -82,7 +82,7 @@ def row_id(stock_id, time_id):
     return f'{int(stock_id)}-{int(time_id)}'
 
 
-def closest(df, window, price_column):
+def calculate_past_n_log_returns(df, window, price_column):
     ### Algortihm to calculate past [window] seconds_in_buckets' log return
     #find which price to minus
     dif_indexes = []
@@ -212,7 +212,7 @@ columns_to_keep_book = ['time_id', 'size_spread', 'd_size_spread',
 features_book = book_features_processing(book_example, columns_to_keep=columns_to_keep_book)
 features_book = features_book.rename_axis(['feature', 'stats'], axis='columns')
 # features_book['freq_time_id'] = features_book.merge(a, on='time_id')
-features_book[('count')]
+
 
 book_05 = book_0[book_0['time_id']==5]
 book_05 = book_05.groupby('time_id').apply(book_calcs)
