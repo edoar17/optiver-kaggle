@@ -180,12 +180,13 @@ def book_complete_feature_processing(book_parquet_filepath, stock_id):
     'd_ask_price_spread': [np.max, np.min, np.std],
     'bid_price_spread':[np.max, np.min, np.std],
     'd_bid_price_spread': [np.max, np.min, np.std],
-    'size_spread': [np.max, np.min, np.std],
+    'size_spread': [np.max, np.min, np.std, 'count'], #get # of book entries
     'd_size_spread': [np.max, np.min, np.std],
     }
     
     processed_features_df = book_features_processing(preprocessed_features_df, feature_agg_dict).reset_index()
-    processed_features_df['row_id'] = processed_features_df['time_id'].apply( lambda x: row_id(stock_id, x))
+    processed_features_df = processed_features_df.add_prefix('book_')
+    processed_features_df['row_id'] = processed_features_df['book_time_id'].apply( lambda x: row_id(stock_id, x)).drop(['book_time_id'], axis=1)
     
     return processed_features_df
 
@@ -194,14 +195,10 @@ www = book_train_pathfile_list[1]
 start = datetime.datetime.now()
 qqq = book_complete_feature_processing(www, stock_id=www.split('=')[1])
 end = datetime.datetime.now()
-print(end-start)
-
-
-
-
+print(end-start) #5mins
 
    
-def trade_features_processing(df):
+def trade_features_preprocessing(df):
     df['price_returns'] = log_return(df['price'])
     df['d_size'] = df['size'].diff()
     df['size_per_order'] = df['size']/df['order_count']
@@ -209,17 +206,17 @@ def trade_features_processing(df):
     df['price_amount'] = df['price']*df['size']
     df['d_price_amount'] = df['price_amount'].diff()
     # df = df.dropna()
-    
+    print('done')
     # Cumulative returns
-    windowed_returns = closest(df.reset_index(), 100, 'price')
+    windowed_returns = calculate_past_n_log_returns(df.reset_index(), 100, 'price')
     df = df.reset_index().merge(windowed_returns, left_index=True, right_index=True)
-    
-    windowed_returns = closest(df.reset_index(), 200, 'price')
+    print('done')
+    windowed_returns = calculate_past_n_log_returns(df.reset_index(), 200, 'price')
     df = df.merge(windowed_returns, left_index=True, right_index=True)
-    
-    windowed_returns = closest(df.reset_index(), 300, 'price')
+    print('done')
+    windowed_returns = calculate_past_n_log_returns(df.reset_index(), 300, 'price')
     df = df.merge(windowed_returns, left_index=True, right_index=True)
-    
+    print('done')
     # windowed_returns = closest(df.reset_index(), 400, 'price')
     # df = df.merge(windowed_returns, left_index=True, right_index=True)
     
@@ -227,14 +224,39 @@ def trade_features_processing(df):
     # df = df.merge(windowed_returns, left_index=True, right_index=True)
     
     #Realized_volatility
-    df['price_vol'] = realized_volatility(df.price_returns)
+    # df['price_vol'] = realized_volatility(df.price_returns)
     return df
 
+def trade_features_processing(trade_df, fe_dict):
+    df = trade_df.groupby('time_id').agg(fe_dict)
+    df.columns = ['_'.join(col) for col in df.columns]
+    return df
 
+def trade_complete_feature_processing(trade_parquet_filepath, stock_id): 
+    parquet_df = pd.read_parquet(trade_parquet_filepath)
+    preprocessed_features_df = parquet_df.groupby('time_id').apply(trade_features_preprocessing).set_index(['index'], drop=True)
 
+    feature_agg_dict = {
+    'price_returns': [realized_volatility],
+    'd_size': [np.max, np.min, np.std],
+    'size_per_order': [np.mean, np.std],
+    'd_order_count': [np.mean, np.max, np.std],
+    'price_amount': [np.max, np.min, np.std, 'count'],#get # of trade entries
+    'd_price_amount': [np.max, np.min, np.std]
+    }
+    
+    processed_features_df = trade_features_processing(preprocessed_features_df, feature_agg_dict).reset_index()
+    processed_features_df['row_id'] = processed_features_df['time_id'].apply( lambda x: row_id(stock_id, x))
+    processed_features_df = processed_features_df.add_prefix('trade_').drop(['trade_time_id'], axis=1)
+    
+    return processed_features_df
 
+start = datetime.datetime.now()
+eee = trade_features_preprocessing(trade_0)
+end = datetime.datetime.now()
+print(end-start) #6.5mins
 
-
+rrr = trade_features_processing(eee, feature_agg_dict)
 
 
 

@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Sep 20 15:23:27 2021
+
+@author: edoar17
+"""
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pyarrow.parquet as pq
+import numpy as np
+from sklearn import metrics
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import MinMaxScaler
+import lightgbm as lgbm
+import datetime
+import glob
+import time
+
+# Download Data
+path_book_train = "kaggle-download/book_train.parquet/stock_id=[0-9][0-9][0-9]"
+path_book_test = "kaggle-download/book_test.parquet/stock_id="
+path_trade_train = "kaggle-download/trade_train.parquet/stock_id="
+path_trade_test = "kaggle-download/trade_test.parquet/stock_id="
+#will use later
+
+train = pd.read_csv('kaggle-download/train.csv')
+test = pd.read_csv('kaggle-download/test.csv')
+sample = pd.read_csv('kaggle-download/sample_submission.csv')
+
+# Useful Formulas
+def log_return(series):
+    return np.log(series).diff()
+
+def pct_change(series):
+    return series.pct_change()
+
+def realized_volatility(series):
+    return np.sqrt(np.sum(series**2))
+
+
+def calculate_past_n_log_returns(df, window, price_column):
+    ### Algortihm to calculate past [window] seconds_in_buckets' log return
+    # find which price to minus
+    dif_indexes = []
+    idx = 0
+    series = df['seconds_in_bucket']
+    xx = series.tolist()[-1]
+    print(xx)
+    for x in series:
+        # print(x)
+        # print(window)
+        # Seconds in bucket to find
+        To_Find = x-window
+        # print(To_Find)
+        if To_Find>0: 
+            while x!=xx:
+                condition = (abs(series[idx] - To_Find) < abs(series[idx+1]-To_Find))
+                if condition:
+                    dif_indexes.append(idx)
+                    print('cond is true')
+                    print(series[idx])
+                    time.sleep(0.2)
+                    break
+                else:
+                    print('didnt go thru')
+                    idx +=1
+                    time.sleep(0.2)
+                    break
+                    
+    indexes_df = df[df['seconds_in_bucket']>window]
+    # print(indexes_df)
+    # print(len(indexes_df))
+    indexes_df = indexes_df.assign(index_to_minus = dif_indexes)
+    # print(indexes_df)    
+    
+    df_with_indexes = df.merge(indexes_df, how='left')
+    df_with_indexes['price_to_minus'] = df_with_indexes['index_to_minus'].apply(lambda x: np.nan if pd.isnull(x) else df[price_column][x])
+    
+    #calculate window return
+    new_col_name = str(price_column) + '_' + str(window)# + '_log_return' # window = 100
+    df_with_indexes[new_col_name] = np.log(df_with_indexes[price_column]) - np.log(df_with_indexes['price_to_minus'])
+    return df_with_indexes[[new_col_name]] #windowed return
+
+qqq = calculate_past_n_log_returns(book_0[book_0['time_id']==5], 100, 'wap1')
+# book_0['bid_size2'].tolist()[-1]
+book_0 = pd.read_parquet('kaggle-download/book_train.parquet/stock_id=0')
+trade_0 =  pd.read_parquet('kaggle-download/trade_train.parquet/stock_id=0')
+
+## BOOK
+def book_calcs(df):
+    # size
+    # df['ask_size'] = df['ask_size1'].add(df['ask_size2'])
+    # df['bid_size'] = df['bid_size1'].add(df['bid_size2'])
+    # df['size_spread'] = df['ask_size'].add(-df['bid_size']) #if negative, bid sz > ask sz
+    # df['d_size_spread'] = abs(df['size_spread']).diff()
+    
+    # # price
+    # df['ask_price'] = (df['ask_price1']+df['ask_price2'])/2
+    # df['d_ask_price'] = pct_change(df['ask_price'])
+    # df['bid_price'] = (df['bid_price1']+df['bid_price2'])/2
+    # df['d_bid_price'] = pct_change(df['bid_price'])
+    
+    # df['price_spread'] = df['ask_size']-df['bid_price']
+    # df['d_price_spread'] = pct_change(df[['price_spread']])
+    # # df['price_spread1'] = df['ask_price1'].add(df['bid_price1'])
+    # # df['price_spread2'] = df['ask_price2'].add(df['bid_price2'])
+    # df['bid_price_spread'] = df['bid_price1'] - df['bid_price2']
+    # df['d_bid_price_spread'] = pct_change(df['bid_price_spread'])
+    # df['ask_price_spread'] = df['ask_price2'] - df['ask_price1']
+    # df['d_ask_price_spread'] = pct_change(df['ask_price_spread'])
+    
+    # # wap
+    df['wap1'] = ( df['ask_size1']*df['bid_price1'] + df['bid_size1']*df['ask_price1'] )/(df['ask_size1']+df['bid_size1'])
+    # df['wap2'] = ( df['ask_size2']*df['bid_price2'] + df['bid_size2']*df['ask_price2'] )/(df['ask_size2']+df['bid_size2'])
+    # # df['wap3'] = ( df['ask_size1']*df['ask_price1'] + df['bid_size1']*df['bid_price1'] )/(df['ask_size1']+df['bid_size1'])
+    # # df['wap4'] = ( df['ask_size2']*df['ask_price2'] + df['bid_size2']*df['bid_price2'] )/(df['ask_size2']+df['bid_size2']) 
+    
+    # # wap returns
+    # df['wap1_ret'] = log_return(df['wap1'])
+    # df['wap2_ret'] = log_return(df['wap2'])
+    # # df['wap3_ret'] = log_return(df['wap3'])
+    # # df['wap4_ret'] = log_return(df['wap4'])
+    
+    # # wap vol
+    # df['wap1_vol'] = realized_volatility(df['wap1_ret'])
+    # df['wap2_vol'] = realized_volatility(df['wap2_ret'])
+    # # df['wap3_vol'] = realized_volatility(df['wap3_ret'])
+    # # df['wap4_vol'] = realized_volatility(df['wap4_ret'])
+    
+    #Cumulative returns
+    windowed_returns = closest(df.reset_index(), 100, 'wap1')
+    df = df.reset_index().merge(windowed_returns, left_index=True, right_index=True)
+    
+    # windowed_returns = closest(df.reset_index(), 200, 'wap1')
+    # df = df.merge(windowed_returns, left_index=True, right_index=True)
+    
+    # windowed_returns = closest(df.reset_index(), 300, 'wap1')
+    # df = df.merge(windowed_returns, left_index=True, right_index=True)
+    
+    # windowed_returns = closest(df.reset_index(), 400, 'wap1')
+    # df = df.merge(windowed_returns, left_index=True, right_index=True)
+    
+    # windowed_returns = closest(df.reset_index(), 500, 'wap1')
+    # df = df.merge(windowed_returns, left_index=True, right_index=True)
+
+    # print(windowed_returns)
+    # print(df)
+    return df
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+raw_book_train_data = glob.glob(pathname=path_book_train)
+
+def download_from_list_of_files(list_of_files):
+    for 
+
+
