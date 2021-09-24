@@ -68,10 +68,13 @@ def calculate_past_n_log_returns(df, window, price_column_name):
         if To_Find>0: 
             length = len(dif_indexes)
             while len(dif_indexes) == length:
-                if abs(series[idx] - To_Find) < abs(series[idx+1]-To_Find):   
-                    dif_indexes.append(idx)
-                    break
-                else: idx += 1
+                if (idx+1) <= (len(series)-1):
+                    if abs(series[idx] - To_Find) < abs(series[idx+1]-To_Find):   
+                        dif_indexes.append(idx)
+                        break
+                    else: idx += 1
+                    print('added one')
+                        break
     
     indexes_df = df[df['seconds_in_bucket']>window]
     indexes_df = indexes_df.assign(index_to_minus = dif_indexes)
@@ -85,119 +88,6 @@ def calculate_past_n_log_returns(df, window, price_column_name):
     df_with_indexes[new_col_name] = df[price_column_name] - df_with_indexes['index_to_minus'].apply(lambda x: np.nan if pd.isnull(x) else df[price_column_name][x])
     return df_with_indexes[[new_col_name]] #windowed return
 
-
-## BOOK
-def book_features_preprocessing(df):
-    # size
-    df['ask_size'] = df['ask_size1'] + df['ask_size2']
-    df['bid_size'] = df['bid_size1'] + df['bid_size2']
-    df['size_spread'] = abs(df['ask_size'] - df['bid_size'])
-    df['d_size_spread'] = df['size_spread'].diff()
-    
-    # price
-    df['ask_price'] = (df['ask_price1']+df['ask_price2'])/2
-    df['ret_ask_price'] = log_return(df['ask_price'])
-    df['bid_price'] = (df['bid_price1']+df['bid_price2'])/2
-    df['ret_bid_price'] = log_return(df['bid_price'])
-    
-    df['price_spread'] = abs(df['ask_size']-df['bid_price'])
-    df['d_price_spread'] = df['price_spread'].diff()
-    # df['price_spread1'] = df['ask_price1'].add(df['bid_price1'])
-    # df['price_spread2'] = df['ask_price2'].add(df['bid_price2'])
-    df['bid_price_spread'] = df['bid_price1'] - df['bid_price2']
-    df['d_bid_price_spread'] = df['bid_price_spread'].diff()
-    df['ask_price_spread'] = df['ask_price2'] - df['ask_price1']
-    df['d_ask_price_spread'] = df['ask_price_spread'].diff()
-    
-    # wap
-    df['wap1'] = calc_wap1(df)
-    df['wap2'] = calc_wap2(df)
-    # df['wap1'] = ( df['ask_size1']*df['bid_price1'] + df['bid_size1']*df['ask_price1'] )/(df['ask_size1']+df['bid_size1'])
-    # df['wap2'] = ( df['ask_size2']*df['bid_price2'] + df['bid_size2']*df['ask_price2'] )/(df['ask_size2']+df['bid_size2'])
-    # df['wap3'] = ( df['ask_size1']*df['ask_price1'] + df['bid_size1']*df['bid_price1'] )/(df['ask_size1']+df['bid_size1'])
-    # df['wap4'] = ( df['ask_size2']*df['ask_price2'] + df['bid_size2']*df['bid_price2'] )/(df['ask_size2']+df['bid_size2']) 
-    
-    # wap returns
-    df['wap1_ret'] = log_return(df['wap1'])
-    df['wap2_ret'] = log_return(df['wap2'])
-    # df['wap3_ret'] = log_return(df['wap3'])
-    # df['wap4_ret'] = log_return(df['wap4'])
-    
-    # wap vol
-    # df['wap1_vol'] = realized_volatility(df['wap1_ret'])
-    # df['wap2_vol'] = realized_volatility(df['wap2_ret'])
-    # df['wap3_vol'] = realized_volatility(df['wap3_ret'])
-    # df['wap4_vol'] = realized_volatility(df['wap4_ret'])
-    
-    #Cumulative returns
-    windowed_returns = calculate_past_n_log_returns(df.reset_index(), 100, 'wap1')
-    df = df.reset_index().merge(windowed_returns, left_index=True, right_index=True)
-    
-    windowed_returns = calculate_past_n_log_returns(df.reset_index(), 200, 'wap1')
-    df = df.merge(windowed_returns, left_index=True, right_index=True)
-    
-    windowed_returns = calculate_past_n_log_returns(df.reset_index(), 300, 'wap1')
-    df = df.merge(windowed_returns, left_index=True, right_index=True)
-    
-    windowed_returns = calculate_past_n_log_returns(df.reset_index(), 400, 'wap1')
-    df = df.merge(windowed_returns, left_index=True, right_index=True)
-    
-    windowed_returns = calculate_past_n_log_returns(df.reset_index(), 500, 'wap1')
-    df = df.merge(windowed_returns, left_index=True, right_index=True)
-
-    # print(windowed_returns)
-    # print(df)
-    return df
-
-start = datetime.datetime.now()
-book_example = book_0.groupby('time_id').apply(book_features_preprocessing).set_index(['index'], drop=True)
-end = datetime.datetime.now()
-print(end-start)
-
-def book_features_processing(book_df, fe_dict):
-    df = book_df.groupby('time_id').agg(fe_dict)
-    df.columns = ['_'.join(col) for col in df.columns]
-    return df
-
-features_book = book_features_processing(book_example, fe_dict=feature_agg_dict).reset_index()
-www = features_book['time_id'].apply(lambda x: )
-
-def book_complete_feature_processing(book_parquet_filepath, stock_id): 
-    parquet_df = pd.read_parquet(book_parquet_filepath)
-    preprocessed_features_df = parquet_df.groupby('time_id').apply(book_features_preprocessing).set_index(['index'], drop=True)
-
-    feature_agg_dict = {
-    'wap1_ret': [realized_volatility],
-    'wap2_ret': [realized_volatility],
-    'wap1_100': [realized_volatility],
-    'wap1_200': [realized_volatility],
-    'wap1_300': [realized_volatility],
-    'wap1_400': [realized_volatility],
-    'wap1_500': [realized_volatility],
-    'ret_ask_price':[realized_volatility],
-    'ret_bid_price':[realized_volatility],
-    'ask_price_spread':[np.max, np.min, np.std],
-    'd_ask_price_spread': [np.max, np.min, np.std],
-    'bid_price_spread':[np.max, np.min, np.std],
-    'd_bid_price_spread': [np.max, np.min, np.std],
-    'size_spread': [np.max, np.min, np.std, 'count'], #get # of book entries
-    'd_size_spread': [np.max, np.min, np.std],
-    }
-    
-    processed_features_df = book_features_processing(preprocessed_features_df, feature_agg_dict).reset_index()
-    processed_features_df = processed_features_df.add_prefix('book_')
-    processed_features_df['row_id'] = processed_features_df['book_time_id'].apply( lambda x: row_id(stock_id, x)).drop(['book_time_id'], axis=1)
-    
-    return processed_features_df
-
-www = book_train_pathfile_list[1]
-
-start = datetime.datetime.now()
-qqq = book_complete_feature_processing(www, stock_id=www.split('=')[1])
-end = datetime.datetime.now()
-print(end-start) #5mins
-
-   
 def trade_features_preprocessing(df):
     df['price_returns'] = log_return(df['price'])
     df['d_size'] = df['size'].diff()
@@ -246,17 +136,219 @@ def trade_complete_feature_processing(trade_parquet_filepath, stock_id):
     }
     
     processed_features_df = trade_features_processing(preprocessed_features_df, feature_agg_dict).reset_index()
-    processed_features_df['row_id'] = processed_features_df['time_id'].apply( lambda x: row_id(stock_id, x))
-    processed_features_df = processed_features_df.add_prefix('trade_').drop(['trade_time_id'], axis=1)
+    processed_features_df = processed_features_df.add_prefix('trade_')
+    processed_features_df['row_id'] = processed_features_df['trade_time_id'].apply( lambda x: row_id(stock_id, x))
+    processed_features_df = processed_features_df.drop(['trade_time_id'], axis=1)
     
     return processed_features_df
 
+##### CADA UNO TIENE
+
 start = datetime.datetime.now()
-eee = trade_features_preprocessing(trade_0)
+eee = trade_features_preprocessing(book_example)
 end = datetime.datetime.now()
 print(end-start) #6.5mins
 
 rrr = trade_features_processing(eee, feature_agg_dict)
+
+
+
+
+
+
+
+
+
+
+def complete_feature_processing(parquet_filepath, trade_or_book):
+    
+    if trade_or_book=='book':
+        
+        prefix = 'book_'
+        feature_agg_dict = {
+        'wap1_ret': [realized_volatility],
+        'wap2_ret': [realized_volatility],
+        'wap1_100': [realized_volatility],
+        'wap1_200': [realized_volatility],
+        'wap1_300': [realized_volatility],
+        'wap1_400': [realized_volatility],
+        'wap1_500': [realized_volatility],
+        'ret_ask_price':[realized_volatility],
+        'ret_bid_price':[realized_volatility],
+        'ask_price_spread':[np.max, np.min, np.std],
+        'd_ask_price_spread': [np.max, np.min, np.std],
+        'bid_price_spread':[np.max, np.min, np.std],
+        'd_bid_price_spread': [np.max, np.min, np.std],
+        'size_spread': [np.max, np.min, np.std, 'count'], #get # of book entries
+        'd_size_spread': [np.max, np.min, np.std],
+        }
+        
+        #functions
+        def features_preprocessing(df):
+            
+            # size
+            df['ask_size'] = df['ask_size1'] + df['ask_size2']
+            df['bid_size'] = df['bid_size1'] + df['bid_size2']
+            df['size_spread'] = abs(df['ask_size'] - df['bid_size'])
+            df['d_size_spread'] = df['size_spread'].diff()
+            
+            # price
+            df['ask_price'] = (df['ask_price1']+df['ask_price2'])/2
+            df['ret_ask_price'] = log_return(df['ask_price'])
+            df['bid_price'] = (df['bid_price1']+df['bid_price2'])/2
+            df['ret_bid_price'] = log_return(df['bid_price'])
+            
+            df['price_spread'] = abs(df['ask_size']-df['bid_price'])
+            df['d_price_spread'] = df['price_spread'].diff()
+            # df['price_spread1'] = df['ask_price1'].add(df['bid_price1'])
+            # df['price_spread2'] = df['ask_price2'].add(df['bid_price2'])
+            df['bid_price_spread'] = df['bid_price1'] - df['bid_price2']
+            df['d_bid_price_spread'] = df['bid_price_spread'].diff()
+            df['ask_price_spread'] = df['ask_price2'] - df['ask_price1']
+            df['d_ask_price_spread'] = df['ask_price_spread'].diff()
+            
+            # wap
+            df['wap1'] = calc_wap1(df)
+            df['wap2'] = calc_wap2(df)
+    
+            # wap returns
+            df['wap1_ret'] = log_return(df['wap1'])
+            df['wap2_ret'] = log_return(df['wap2'])
+    
+            
+            #Cumulative returns
+            windowed_returns = calculate_past_n_log_returns(df.reset_index(), 100, 'wap1')
+            df = df.reset_index().merge(windowed_returns, left_index=True, right_index=True)
+            
+            windowed_returns = calculate_past_n_log_returns(df.reset_index(), 200, 'wap1')
+            df = df.merge(windowed_returns, left_index=True, right_index=True)
+            
+            windowed_returns = calculate_past_n_log_returns(df.reset_index(), 300, 'wap1')
+            df = df.merge(windowed_returns, left_index=True, right_index=True)
+            
+            windowed_returns = calculate_past_n_log_returns(df.reset_index(), 400, 'wap1')
+            df = df.merge(windowed_returns, left_index=True, right_index=True)
+            
+            windowed_returns = calculate_past_n_log_returns(df.reset_index(), 500, 'wap1')
+            df = df.merge(windowed_returns, left_index=True, right_index=True)
+            return df
+        
+        
+#####################################################     
+    elif trade_or_book=='trade':
+            
+        prefix = 'trade_'
+        feature_agg_dict = {
+        'price_returns': [realized_volatility],
+        'd_size': [np.max, np.min, np.std],
+        'size_per_order': [np.mean, np.std],
+        'd_order_count': [np.mean, np.max, np.std],
+        'price_amount': [np.max, np.min, np.std, 'count'],#get # of trade entries
+        'd_price_amount': [np.max, np.min, np.std]
+        }
+    
+        def features_preprocessing(df):
+           
+            df['price_returns'] = log_return(df['price'])
+            df['d_size'] = df['size'].diff()
+            df['size_per_order'] = df['size']/df['order_count']
+            df['d_order_count'] = df['order_count'].diff()
+            df['price_amount'] = df['price']*df['size']
+            df['d_price_amount'] = df['price_amount'].diff()
+            # Cumulative returns
+            windowed_returns = calculate_past_n_log_returns(df.reset_index(), 100, 'price')
+            df = df.reset_index().merge(windowed_returns, left_index=True, right_index=True)
+            # print('done 100')
+            windowed_returns = calculate_past_n_log_returns(df.reset_index(), 200, 'price')
+            df = df.merge(windowed_returns, left_index=True, right_index=True)
+            # print('done 200')
+            windowed_returns = calculate_past_n_log_returns(df.reset_index(), 300, 'price')
+            df = df.merge(windowed_returns, left_index=True, right_index=True)
+            # print('done 300')
+            return df
+    ############################
+    else: 
+        print('Need to provide a Trade or Book')
+    
+    def features_processing(x_df, fe_dict):
+        df = x_df.groupby('time_id').agg(fe_dict)
+        df.columns = ['_'.join(col) for col in df.columns]
+        return df
+    
+    # Start process
+    #read file
+    parquet_df = pd.read_parquet(parquet_filepath)
+    #data wrangling
+    pre_features_df = parquet_df.groupby('time_id').apply(features_preprocessing).set_index(['index'], drop=True)
+
+    # Apply Aggs
+    processed_features_df = features_processing(pre_features_df, feature_agg_dict).reset_index()
+    processed_features_df = processed_features_df.add_prefix(prefix)
+
+    #Clean up
+    stock_id = parquet_filepath.split('=')[1]
+    x_time_id =  str(prefix + 'time_id')
+    processed_features_df['row_id'] = processed_features_df[x_time_id].apply( lambda x: row_id(stock_id, x))
+    processed_features_df = processed_features_df.drop([x_time_id], axis=1)
+    
+    return processed_features_df
+    
+
+#book TESTING
+start = datetime.datetime.now()
+pq = book_train_pathfile_list[2]
+TESTING_BOOK = complete_feature_processing(pq, trade_or_book='book')
+end = datetime.datetime.now()
+print(end-start) #5.75mins
+start = datetime.datetime.now()
+pq2 = trade_train_pathfile_list[7]
+pq3 = 'kaggle-download/trade_train.parquet/stock_id=0'
+TESTING_TRADE = complete_feature_processing(pq3, trade_or_book='trade')
+end = datetime.datetime.now()
+print(end-start)#1min30
+
+def calculate_past_n_log_returns(df, window, price_column_name):
+    """Algorithm to calculate past [window] seconds_in_buckets' log return"""
+    
+    dif_indexes = []
+    idx = 0
+    series = df['seconds_in_bucket']
+    for current_seconds in series:
+        To_Find = current_seconds-window
+        if To_Find>0: 
+            length = len(dif_indexes)
+            while len(dif_indexes) == length:
+                if (idx+1) <= (len(series)-1):
+                    if abs(series[idx] - To_Find) < abs(series[idx+1]-To_Find):   
+                        dif_indexes.append(idx)
+                        break
+                    else: 
+                        idx += 1
+                else: 
+                    break
+    
+    indexes_df = df[df['seconds_in_bucket']>window]
+    if len(dif_indexes) == len(indexes_df):
+        indexes_df = indexes_df.assign(index_to_minus = dif_indexes)
+    else: 
+        dif_indexes = [np.nan] + dif_indexes
+        indexes_df = indexes_df.assign(index_to_minus = dif_indexes)    
+    # print(indexes_df)    
+    
+    #merge indexes of prices to minus
+    df_with_indexes = df.merge(indexes_df, how='left')
+    
+    new_col_name = str(price_column_name) + '_' + str(window)
+    #df[price]-df[price paired to index]
+    df_with_indexes[new_col_name] = df[price_column_name] - df_with_indexes['index_to_minus'].apply(lambda x: np.nan if pd.isnull(x) else df[price_column_name][x])
+    return df_with_indexes[[new_col_name]] #windowed return
+
+
+
+
+
+
+
 
 
 
