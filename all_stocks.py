@@ -7,13 +7,8 @@ Created on Thu Sep 23 01:32:08 2021
 """
 
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import pyarrow.parquet as pq
 import numpy as np
-from sklearn import metrics
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import KFold
 import lightgbm as lgb
@@ -22,7 +17,6 @@ import glob
 from joblib import Parallel, delayed
 
 # Download Data
-
 train = pd.read_csv('kaggle-download/train.csv')
 test = pd.read_csv('kaggle-download/test.csv')
 sample = pd.read_csv('kaggle-download/sample_submission.csv')
@@ -35,7 +29,6 @@ book_train_pathfile_list = glob.glob('kaggle-download/book_train.parquet/*')
 book_test_pathfile_list = glob.glob('kaggle-download/book_test.parquet/*')
 trade_train_pathfile_list = glob.glob('kaggle-download/trade_train.parquet/*')
 trade_test_pathfile_list = glob.glob('kaggle-download/trade_test.parquet/*')
-
 # book_train_pathfile_list[:10]
 
 def log_return(series):
@@ -57,12 +50,6 @@ def calc_wap2(df):
 
 def row_id(stock_id, time_id):
     return f'{int(stock_id)}-{int(time_id)}'
-
-def undo_row_id(row_id, for_stock_id):
-    if for_stock_id:
-        return row_id.split('-')[0]
-    if not for_stock_id:
-        return row_id.split('-')[1]
 
 
 def calculate_past_n_log_returns(df, window, price_column_name):
@@ -143,8 +130,8 @@ def complete_feature_processing(parquet_filepath, trade_or_book=''):
             
             df['price_spread'] = abs(df['ask_size']-df['bid_price'])
             df['d_price_spread'] = df['price_spread'].diff()
-            # df['price_spread1'] = df['ask_price1'].add(df['bid_price1'])
-            # df['price_spread2'] = df['ask_price2'].add(df['bid_price2'])
+            # df['price_spread1'] = df['ask_price1'].add(-df['bid_price1'])
+            # df['price_spread2'] = df['ask_price2'].add(-df['bid_price2'])
             df['bid_price_spread'] = df['bid_price1'] - df['bid_price2']
             df['d_bid_price_spread'] = df['bid_price_spread'].diff()
             df['ask_price_spread'] = df['ask_price2'] - df['ask_price1']
@@ -190,6 +177,7 @@ def complete_feature_processing(parquet_filepath, trade_or_book=''):
         'd_price_amount': [np.max, np.min, np.std]
         }
     
+        #functions
         def features_preprocessing(df):
            
             df['price_returns'] = log_return(df['price'])
@@ -220,9 +208,9 @@ def complete_feature_processing(parquet_filepath, trade_or_book=''):
         return df
     
     # Start process
-    #read file
+    # Read file
     parquet_df = pd.read_parquet(parquet_filepath)
-    #data wrangling
+    # Data wrangling
     pre_features_df = parquet_df.groupby('time_id').apply(features_preprocessing).set_index(['index'], drop=True)
 
     # Apply Aggs
@@ -238,24 +226,8 @@ def complete_feature_processing(parquet_filepath, trade_or_book=''):
     return processed_features_df
     
 
-# #book TESTING
-# start = datetime.datetime.now()
-# pq = book_train_pathfile_list[2]
-# TESTING_BOOK = complete_feature_processing(pq, trade_or_book='book')
-# end = datetime.datetime.now()
-# print(end-start) #5.75mins
-# #trade TESTING
-# start = datetime.datetime.now()
-# pq2 = trade_train_pathfile_list[7]
-# pq3 = 'kaggle-download/trade_train.parquet/stock_id=0'
-# TESTING_TRADE = complete_feature_processing(pq2, trade_or_book='trade')
-# TESTING_TRADE2 = complete_feature_processing(pq3, trade_or_book='trade')
-# end = datetime.datetime.now()
-# print(end-start)#1min30
-
-
 ###### Create final df
-train
+# train
 train['row_id'] = train['stock_id'].astype(str) + '-' + train['time_id'].astype(str)
 
 def transform_parquets(parquet_pathlist, trade_or_book=''):
@@ -302,23 +274,21 @@ cols_to_scale = [col for col in train_df.columns if col not in ['stock_id', 'tim
 cols_to_scale = [col for col in cols_to_scale if 'volatility' not in col]
 
 train_test_scale = train_df.append(test_df)
-# train_test_scale.iloc[:-1,]
 train_test_scale[cols_to_scale] = scaler.fit_transform(train_test_scale[cols_to_scale])
 train_df[cols_to_scale] = train_test_scale[cols_to_scale].iloc[:-3,]
 test_df[cols_to_scale] = train_test_scale[cols_to_scale].iloc[-3:]
 
-#convert data types object--->category
+#convert data types object ---> category
 test_df['time_id'] = test_df['time_id'].astype('category')
 test_df['stock_id'] = test_df['stock_id'].astype('category')
 train_df['time_id'] = train_df['time_id'].astype('category')
 train_df['stock_id'] = train_df['stock_id'].astype('category')
 
-test_df
-train_df[train_df['time_id']==34]
-train_df['time_id'].unique()
 
-seed0=2021
-params0 = {
+########## MODEL
+SEED = 567
+
+params = {
     'objective': 'rmse',
     'boosting_type': 'gbdt',
     'max_depth': -1,
@@ -331,37 +301,13 @@ params0 = {
     'lambda_l1': 0.5,
     'lambda_l2': 1.0,
     'categorical_column':[0],
-    'seed':seed0,
-    'feature_fraction_seed': seed0,
-    'bagging_seed': seed0,
-    'drop_seed': seed0,
-    'data_random_seed': seed0,
+    'seed':SEED,
+    'feature_fraction_seed': SEED,
+    'bagging_seed': SEED,
+    'drop_seed': SEED,
+    'data_random_seed': SEED,
     'n_jobs':-1,
     'verbose': -1}
-seed1=42
-params1 = {
-        'learning_rate': 0.1,        
-        'lambda_l1': 2,
-        'lambda_l2': 7,
-        'num_leaves': 800,
-        'min_sum_hessian_in_leaf': 20,
-        'feature_fraction': 0.8,
-        'feature_fraction_bynode': 0.8,
-        'bagging_fraction': 0.9,
-        'bagging_freq': 42,
-        'min_data_in_leaf': 700,
-        'max_depth': 4,
-        'categorical_column':[0],
-        'seed': seed1,
-        'feature_fraction_seed': seed1,
-        'bagging_seed': seed1,
-        'drop_seed': seed1,
-        'data_random_seed': seed1,
-        'objective': 'rmse',
-        'boosting': 'gbdt',
-        'verbosity': -1,
-        'n_jobs':-1,
-    }
 
 def rmspe(y_true, y_pred):
     return np.sqrt(np.mean(np.square((y_true - y_pred) / y_true)))
@@ -380,7 +326,7 @@ def train_and_evaluate_lgb(train, test, params):
     # Create test array to store predictions
     test_predictions = np.zeros(test.shape[0])
     # Create a KFold object
-    kfold = KFold(n_splits = 5, random_state = 2021, shuffle = True)
+    kfold = KFold(n_splits = 5, random_state = SEED, shuffle = True)
     # Iterate through each fold
     for fold, (trn_ind, val_ind) in enumerate(kfold.split(train)):
         print(f'Training fold {fold + 1}')
@@ -407,8 +353,9 @@ def train_and_evaluate_lgb(train, test, params):
     lgb.plot_importance(model,max_num_features=20)
     # Return test predictions
     return test_predictions
+
 # Traing and evaluate
-predictions_lgb = train_and_evaluate_lgb(train_df, test_df, params0)
+predictions_lgb = train_and_evaluate_lgb(train_df, test_df, params)
 test_df['target'] = predictions_lgb
 test_df[['row_id', 'target']].to_csv('submission.csv',index = False)
 
