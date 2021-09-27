@@ -15,9 +15,11 @@ from sklearn import metrics
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import MinMaxScaler
-import lightgbm as lgbm
-import datetime
+from sklearn.model_selection import KFold
+import lightgbm as lgb
+from datetime import datetime
 import glob
+from joblib import Parallel, delayed
 
 # Download Data
 
@@ -34,7 +36,7 @@ book_test_pathfile_list = glob.glob('kaggle-download/book_test.parquet/*')
 trade_train_pathfile_list = glob.glob('kaggle-download/trade_train.parquet/*')
 trade_test_pathfile_list = glob.glob('kaggle-download/trade_test.parquet/*')
 
-book_train_pathfile_list[:10]
+# book_train_pathfile_list[:10]
 
 def log_return(series):
     return np.log(series).diff()
@@ -56,6 +58,12 @@ def calc_wap2(df):
 def row_id(stock_id, time_id):
     return f'{int(stock_id)}-{int(time_id)}'
 
+def undo_row_id(row_id, for_stock_id):
+    if for_stock_id:
+        return row_id.split('-')[0]
+    if not for_stock_id:
+        return row_id.split('-')[1]
+
 
 def calculate_past_n_log_returns(df, window, price_column_name):
     """Algorithm to calculate past [window] seconds_in_buckets' log return"""
@@ -72,12 +80,17 @@ def calculate_past_n_log_returns(df, window, price_column_name):
                     if abs(series[idx] - To_Find) < abs(series[idx+1]-To_Find):   
                         dif_indexes.append(idx)
                         break
-                    else: idx += 1
-                    print('added one')
-                        break
+                    else: 
+                        idx += 1
+                else: 
+                    break
     
     indexes_df = df[df['seconds_in_bucket']>window]
-    indexes_df = indexes_df.assign(index_to_minus = dif_indexes)
+    if len(dif_indexes) == len(indexes_df):
+        indexes_df = indexes_df.assign(index_to_minus = dif_indexes)
+    else: 
+        dif_indexes = [np.nan] + dif_indexes
+        indexes_df = indexes_df.assign(index_to_minus = dif_indexes)    
     # print(indexes_df)    
     
     #merge indexes of prices to minus
@@ -88,79 +101,9 @@ def calculate_past_n_log_returns(df, window, price_column_name):
     df_with_indexes[new_col_name] = df[price_column_name] - df_with_indexes['index_to_minus'].apply(lambda x: np.nan if pd.isnull(x) else df[price_column_name][x])
     return df_with_indexes[[new_col_name]] #windowed return
 
-def trade_features_preprocessing(df):
-    df['price_returns'] = log_return(df['price'])
-    df['d_size'] = df['size'].diff()
-    df['size_per_order'] = df['size']/df['order_count']
-    df['d_order_count'] = df['order_count'].diff()
-    df['price_amount'] = df['price']*df['size']
-    df['d_price_amount'] = df['price_amount'].diff()
-    # df = df.dropna()
-    print('done')
-    # Cumulative returns
-    windowed_returns = calculate_past_n_log_returns(df.reset_index(), 100, 'price')
-    df = df.reset_index().merge(windowed_returns, left_index=True, right_index=True)
-    print('done')
-    windowed_returns = calculate_past_n_log_returns(df.reset_index(), 200, 'price')
-    df = df.merge(windowed_returns, left_index=True, right_index=True)
-    print('done')
-    windowed_returns = calculate_past_n_log_returns(df.reset_index(), 300, 'price')
-    df = df.merge(windowed_returns, left_index=True, right_index=True)
-    print('done')
-    # windowed_returns = closest(df.reset_index(), 400, 'price')
-    # df = df.merge(windowed_returns, left_index=True, right_index=True)
-    
-    # windowed_returns = closest(df.reset_index(), 500, 'price')
-    # df = df.merge(windowed_returns, left_index=True, right_index=True)
-    
-    #Realized_volatility
-    # df['price_vol'] = realized_volatility(df.price_returns)
-    return df
 
-def trade_features_processing(trade_df, fe_dict):
-    df = trade_df.groupby('time_id').agg(fe_dict)
-    df.columns = ['_'.join(col) for col in df.columns]
-    return df
-
-def trade_complete_feature_processing(trade_parquet_filepath, stock_id): 
-    parquet_df = pd.read_parquet(trade_parquet_filepath)
-    preprocessed_features_df = parquet_df.groupby('time_id').apply(trade_features_preprocessing).set_index(['index'], drop=True)
-
-    feature_agg_dict = {
-    'price_returns': [realized_volatility],
-    'd_size': [np.max, np.min, np.std],
-    'size_per_order': [np.mean, np.std],
-    'd_order_count': [np.mean, np.max, np.std],
-    'price_amount': [np.max, np.min, np.std, 'count'],#get # of trade entries
-    'd_price_amount': [np.max, np.min, np.std]
-    }
-    
-    processed_features_df = trade_features_processing(preprocessed_features_df, feature_agg_dict).reset_index()
-    processed_features_df = processed_features_df.add_prefix('trade_')
-    processed_features_df['row_id'] = processed_features_df['trade_time_id'].apply( lambda x: row_id(stock_id, x))
-    processed_features_df = processed_features_df.drop(['trade_time_id'], axis=1)
-    
-    return processed_features_df
-
-##### CADA UNO TIENE
-
-start = datetime.datetime.now()
-eee = trade_features_preprocessing(book_example)
-end = datetime.datetime.now()
-print(end-start) #6.5mins
-
-rrr = trade_features_processing(eee, feature_agg_dict)
-
-
-
-
-
-
-
-
-
-
-def complete_feature_processing(parquet_filepath, trade_or_book):
+############ BIG FN
+def complete_feature_processing(parquet_filepath, trade_or_book=''):
     
     if trade_or_book=='book':
         
@@ -234,7 +177,7 @@ def complete_feature_processing(parquet_filepath, trade_or_book):
             return df
         
         
-#####################################################     
+    #####################################################     
     elif trade_or_book=='trade':
             
         prefix = 'trade_'
@@ -266,9 +209,10 @@ def complete_feature_processing(parquet_filepath, trade_or_book):
             df = df.merge(windowed_returns, left_index=True, right_index=True)
             # print('done 300')
             return df
-    ############################
+    ##################################################
     else: 
         print('Need to provide a Trade or Book')
+        return
     
     def features_processing(x_df, fe_dict):
         df = x_df.groupby('time_id').agg(fe_dict)
@@ -288,60 +232,213 @@ def complete_feature_processing(parquet_filepath, trade_or_book):
     #Clean up
     stock_id = parquet_filepath.split('=')[1]
     x_time_id =  str(prefix + 'time_id')
-    processed_features_df['row_id'] = processed_features_df[x_time_id].apply( lambda x: row_id(stock_id, x))
+    processed_features_df['row_id'] = processed_features_df[x_time_id].apply(lambda x: row_id(stock_id, x))
     processed_features_df = processed_features_df.drop([x_time_id], axis=1)
     
     return processed_features_df
     
 
-#book TESTING
-start = datetime.datetime.now()
-pq = book_train_pathfile_list[2]
-TESTING_BOOK = complete_feature_processing(pq, trade_or_book='book')
-end = datetime.datetime.now()
-print(end-start) #5.75mins
-start = datetime.datetime.now()
-pq2 = trade_train_pathfile_list[7]
-pq3 = 'kaggle-download/trade_train.parquet/stock_id=0'
-TESTING_TRADE = complete_feature_processing(pq3, trade_or_book='trade')
-end = datetime.datetime.now()
-print(end-start)#1min30
+# #book TESTING
+# start = datetime.datetime.now()
+# pq = book_train_pathfile_list[2]
+# TESTING_BOOK = complete_feature_processing(pq, trade_or_book='book')
+# end = datetime.datetime.now()
+# print(end-start) #5.75mins
+# #trade TESTING
+# start = datetime.datetime.now()
+# pq2 = trade_train_pathfile_list[7]
+# pq3 = 'kaggle-download/trade_train.parquet/stock_id=0'
+# TESTING_TRADE = complete_feature_processing(pq2, trade_or_book='trade')
+# TESTING_TRADE2 = complete_feature_processing(pq3, trade_or_book='trade')
+# end = datetime.datetime.now()
+# print(end-start)#1min30
 
-def calculate_past_n_log_returns(df, window, price_column_name):
-    """Algorithm to calculate past [window] seconds_in_buckets' log return"""
+
+###### Create final df
+train
+train['row_id'] = train['stock_id'].astype(str) + '-' + train['time_id'].astype(str)
+
+def transform_parquets(parquet_pathlist, trade_or_book=''):
+
+    full_dfs = pd.DataFrame()
     
-    dif_indexes = []
-    idx = 0
-    series = df['seconds_in_bucket']
-    for current_seconds in series:
-        To_Find = current_seconds-window
-        if To_Find>0: 
-            length = len(dif_indexes)
-            while len(dif_indexes) == length:
-                if (idx+1) <= (len(series)-1):
-                    if abs(series[idx] - To_Find) < abs(series[idx+1]-To_Find):   
-                        dif_indexes.append(idx)
-                        break
-                    else: 
-                        idx += 1
-                else: 
-                    break
+    def for_joblib(path):
+        if trade_or_book == 'book':
+            new_df = complete_feature_processing(path, trade_or_book='book')
+        elif trade_or_book == 'trade': 
+            new_df = complete_feature_processing(path, trade_or_book='trade')
+        return new_df
     
-    indexes_df = df[df['seconds_in_bucket']>window]
-    if len(dif_indexes) == len(indexes_df):
-        indexes_df = indexes_df.assign(index_to_minus = dif_indexes)
-    else: 
-        dif_indexes = [np.nan] + dif_indexes
-        indexes_df = indexes_df.assign(index_to_minus = dif_indexes)    
-    # print(indexes_df)    
+    # parallel to make it 100x faster
+    df = Parallel(n_jobs = -1, verbose = 112)(delayed(for_joblib)(path) for path in parquet_pathlist)
+    df = pd.concat(df, ignore_index = True)
     
-    #merge indexes of prices to minus
-    df_with_indexes = df.merge(indexes_df, how='left')
+    return df
+
+### TRADE
+# start = datetime.now()
+trade_train = transform_parquets(trade_train_pathfile_list, trade_or_book='trade')
+trade_test = transform_parquets(trade_test_pathfile_list, trade_or_book='trade')
+# end = datetime.now()
+# print(end-start) #32 mins
+### BOOK
+# start = datetime.now()
+book_train = transform_parquets(book_train_pathfile_list, trade_or_book='book')
+book_test = transform_parquets(book_test_pathfile_list, trade_or_book='book')
+# end = datetime.now()
+# print(end-start) #1.75hrs
+
+#merge dfs
+train_df = book_train.merge(trade_train, on='row_id')
+train_df = train.merge(train_df , on='row_id')
+
+test_df = book_test.merge(trade_test, on='row_id')
+test_df = test.merge(test_df , on='row_id', how='outer').fillna(0)
+
+
+#### Feature transform
+scaler = MinMaxScaler()
+cols_to_scale = [col for col in train_df.columns if col not in ['stock_id', 'time_id', 'row_id', 'target']]
+cols_to_scale = [col for col in cols_to_scale if 'volatility' not in col]
+
+train_test_scale = train_df.append(test_df)
+# train_test_scale.iloc[:-1,]
+train_test_scale[cols_to_scale] = scaler.fit_transform(train_test_scale[cols_to_scale])
+train_df[cols_to_scale] = train_test_scale[cols_to_scale].iloc[:-3,]
+test_df[cols_to_scale] = train_test_scale[cols_to_scale].iloc[-3:]
+
+#convert data types object--->category
+test_df['time_id'] = test_df['time_id'].astype('category')
+test_df['stock_id'] = test_df['stock_id'].astype('category')
+train_df['time_id'] = train_df['time_id'].astype('category')
+train_df['stock_id'] = train_df['stock_id'].astype('category')
+
+test_df
+train_df[train_df['time_id']==34]
+train_df['time_id'].unique()
+
+seed0=2021
+params0 = {
+    'objective': 'rmse',
+    'boosting_type': 'gbdt',
+    'max_depth': -1,
+    'max_bin':100,
+    'min_data_in_leaf':500,
+    'learning_rate': 0.05,
+    'subsample': 0.72,
+    'subsample_freq': 4,
+    'feature_fraction': 0.5,
+    'lambda_l1': 0.5,
+    'lambda_l2': 1.0,
+    'categorical_column':[0],
+    'seed':seed0,
+    'feature_fraction_seed': seed0,
+    'bagging_seed': seed0,
+    'drop_seed': seed0,
+    'data_random_seed': seed0,
+    'n_jobs':-1,
+    'verbose': -1}
+seed1=42
+params1 = {
+        'learning_rate': 0.1,        
+        'lambda_l1': 2,
+        'lambda_l2': 7,
+        'num_leaves': 800,
+        'min_sum_hessian_in_leaf': 20,
+        'feature_fraction': 0.8,
+        'feature_fraction_bynode': 0.8,
+        'bagging_fraction': 0.9,
+        'bagging_freq': 42,
+        'min_data_in_leaf': 700,
+        'max_depth': 4,
+        'categorical_column':[0],
+        'seed': seed1,
+        'feature_fraction_seed': seed1,
+        'bagging_seed': seed1,
+        'drop_seed': seed1,
+        'data_random_seed': seed1,
+        'objective': 'rmse',
+        'boosting': 'gbdt',
+        'verbosity': -1,
+        'n_jobs':-1,
+    }
+
+def rmspe(y_true, y_pred):
+    return np.sqrt(np.mean(np.square((y_true - y_pred) / y_true)))
+
+def feval_rmspe(y_pred, lgb_train):
+    y_true = lgb_train.get_label()
+    return 'RMSPE', rmspe(y_true, y_pred), False
+
+def train_and_evaluate_lgb(train, test, params):
+    # Hyperparameters (just basic)
     
-    new_col_name = str(price_column_name) + '_' + str(window)
-    #df[price]-df[price paired to index]
-    df_with_indexes[new_col_name] = df[price_column_name] - df_with_indexes['index_to_minus'].apply(lambda x: np.nan if pd.isnull(x) else df[price_column_name][x])
-    return df_with_indexes[[new_col_name]] #windowed return
+    features = [col for col in train.columns if col not in {"target", "row_id"}]
+    y = train['target']
+    # Create out of folds array
+    oof_predictions = np.zeros(train.shape[0])
+    # Create test array to store predictions
+    test_predictions = np.zeros(test.shape[0])
+    # Create a KFold object
+    kfold = KFold(n_splits = 5, random_state = 2021, shuffle = True)
+    # Iterate through each fold
+    for fold, (trn_ind, val_ind) in enumerate(kfold.split(train)):
+        print(f'Training fold {fold + 1}')
+        x_train, x_val = train.iloc[trn_ind], train.iloc[val_ind]
+        y_train, y_val = y.iloc[trn_ind], y.iloc[val_ind]
+        # Root mean squared percentage error weights
+        train_weights = 1 / np.square(y_train)
+        val_weights = 1 / np.square(y_val)
+        train_dataset = lgb.Dataset(x_train[features], y_train, weight = train_weights)
+        val_dataset = lgb.Dataset(x_val[features], y_val, weight = val_weights)
+        model = lgb.train(params = params,
+                          num_boost_round=1400,
+                          train_set = train_dataset, 
+                          valid_sets = [train_dataset, val_dataset], 
+                          verbose_eval = 250,
+                          early_stopping_rounds=30,
+                          feval = feval_rmspe)
+        # Add predictions to the out of folds array
+        oof_predictions[val_ind] = model.predict(x_val[features])
+        # Predict the test set
+        test_predictions += model.predict(test[features]) / 5
+    rmspe_score = rmspe(y, oof_predictions)
+    print(f'Our out of folds RMSPE is {rmspe_score}')
+    lgb.plot_importance(model,max_num_features=20)
+    # Return test predictions
+    return test_predictions
+# Traing and evaluate
+predictions_lgb = train_and_evaluate_lgb(train_df, test_df, params0)
+test_df['target'] = predictions_lgb
+test_df[['row_id', 'target']].to_csv('submission.csv',index = False)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
